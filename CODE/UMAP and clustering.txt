@@ -1,0 +1,80 @@
+#remotes::install_version("SeuratObject", "4.1.4", repos = c("")))#
+remotes::install_version("Seurat", "4.4.0", repos = c("")))
+
+library(Seurat) 
+library(tidyverse)
+library(patchwork)
+library(RColorBrewer)
+
+combined <- readRDS('final_combined.RDS')
+#An object of class Seurat 
+#29452 features across 82742 samples within 1 assay 
+#Active assay: RNA (29452 features, 2000 variable features)
+# 3 dimensional reductions calculated: pca, UMAP_dim30, UMAP_dim50
+
+cell_order <- c()
+
+cell_colors <- c()
+names(cell_colors) <- cell_order
+
+
+# Figure 1B - UMAP Showing all of the Cell Types Captured in Our Analysis ----p1
+ <- DimPlot(combined,
+              group.by = 'cluster_anno_l2',
+              raster = TRUE,
+              pt.size = 2,
+              raster.dpi = c(1028,1028),
+              label = TRUE,
+               repel = TRUE,
+               reduction = "UMAP_dim30",
+               cols = cell_colors) +
+   coord_fixed() +
+   ggtitle("Comprehensive scRNA-Seq BM Atlas\nn=82,742 cells") +
+  #NoAxes() +
+   SeuratExtend::theme_umap_arrows(x_label = "UMAP1",y_label = "UMAP2",
+                     text_offset_x = unit(2, 'mm'),
+                    text_offset_y = unit(2, 'mm'),
+                    text_size = 15) +
+  NoLegend()
+p1
+ggsave(p1,file = "Fig1B-scRNA_UMAP.pdf",width = 6, height = 6)
+
+
+细胞占比柱状图
+# Figure 1C - Bar chart showing the counts of each lineage assayed -----
+
+## Figure 1C (left)
+cal1_cols <- c("#E0B0FF", "#A7C7E7", "#AFE1AF", "#BDB5D5", "#FFB6C1", "#F28C28", "#DD3F4E")
+
+p2 <- combined@meta.data %>%
+   ggplot(aes(y = forcats::fct_rev(forcats::fct_infreq(cluster_anno_l1)), fill = cluster_anno_l1)) +
+   geom_bar(stat = 'count') +
+  labs(x = 'Cell count', y = NULL) +
+  scale_fill_manual(name = "Cell lineage",
+                     values = cal1_cols,
+                     labels = c("HSPC", "Myeloid", "Lymphoid", "Meg/E", "Mesenchymal", "Endothelial", "Muscle")) +
+   theme_bw(base_size = 16) +
+   theme(axis.text = element_text(size = 16, color = 'black'))
+ 
+cell_counts <- as.data.frame(table(combined$cluster_anno_l1,combined$orig.ident))
+
+## Figure 1C (right)
+p3 <- ggplot(data = cell_counts, aes(x = forcats::fct_rev(Var2),y = Freq, fill = Var1)) +
+  geom_bar(position="fill",stat="identity") +
+   coord_flip() +
+  labs(x = NULL, y = 'Cell Lineage Frequency') +
+   scale_x_discrete(labels = c("H41", "H39", "H38", "H36", "H35", "H34", "H33", "H32", "H24", "H23", "H21", "H14")) +
+  scale_fill_manual(name = "Cell lineage",
+                     values = cal1_cols) +
+   theme_bw(base_size = 16) +
+   theme(axis.text = element_text(size = 16, color = 'black'))
+ 
+fig1c <- p2 + p3 + plot_layout(guides = "collect") &
+  plot_annotation(
+    title = "Atlas Composition",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16, face = 'bold'))
+  )
+
+fig1c
+ggsave("Fig1C-Bar plots showing the cell counts for each lineage captured (left) and the cell lineage proport
+

@@ -1,0 +1,228 @@
+分群：
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+library(SingleR)
+library(CCA)
+library(clustree)
+library(cowplot)
+library(monocle)
+library(tidyverse)
+library(SCpubr)
+library(UCell)
+library(irGSEA)
+library(GSVA)
+library(GSEABase)
+library(harmony)
+library(plyr)
+data_dir <- paste0(getwd(),"/10Xdata")       
+samples=list.files(data_dir)
+dir=file.path(data_dir,samples)
+afdata <- Read10X(data.dir = dir)
+seurat <- CreateSeuratObject(counts = afdata,
+                              project = "SeuratObject",
+                              min.cells = 3,
+                             min.features = 200)
+seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
+seurat[["percent.rb"]] <- PercentageFeatureSet(seurat, pattern = "^RP")
+#进行数据质控randomColor <- function() {
+  paste0("#",paste0(sample(c(0:9, letters[1:6]), 6, replace = TRUE),collapse = ""))
+}
+randomColors <- replicate(100,randomColor())
+pdf("数据质控.pdf")
+VlnPlot(seurat, features = c("nCount_RNA","nFeature_RNA", "percent.mt","percent.rb"), ncol = 4)+scale_fill_manual(values =randomColors)
+dev.off()
+mask1 <- seurat$nCount_RNA >= 0 & seurat$nCount_RNA<= 50000#细胞内检测到的分子总数
+mask2 <- seurat$nFeature_RNA >=0 & seurat$nFeature_RNA <= 4000 #每个细胞中检测到的基因数量
+mask3 <- seurat$percent.mt <= 15#结合线粒体基因（percent.mt）去除异常值
+mask4<-seurat$percent.rb<= 40#核糖体基因（percent.rb）除去异常值
+#可除去大多数双峰/死细胞/空液滴
+mask <- mask1 & mask2 & mask3 & mask4
+seurat <- seurat[, mask]
+seurat$Type=Idents(seurat)
+pdf("数据质控后.pdf")
+VlnPlot(seurat, features = c("nCount_RNA","nFeature_RNA", "percent.mt","percent.rb"), ncol = 4)+scale_fill_manual(values =randomColors)dev.off()
+saveRDS(seurat,"seurat.rds")
+
+randomColor <- function() {
+  paste0("#",paste0(sample(c(0:9, letters[1:6]), 6, replace = TRUE),collapse = ""))
+}
+randomColors <- replicate(100,randomColor())
+seurat=readRDS("seurat.rds")
+
+pdf("分子数与基因数关系.pdf")
+FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")+ RotatedAxis()dev.off()
+
+pdf("分子数与核糖体关系.pdf")
+FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "percent.rb")+ RotatedAxis()dev.off()
+
+pdf("分子数与线粒体关系.pdf")
+FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "percent.mt")+ RotatedAxis()dev.off()
+
+##标准化LogNormalize
+seurat <- NormalizeData(seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+
+## 鉴定高变基因
+seurat <- FindVariableFeatures(seurat, selection.method = "vst", nfeatures = 2000)
+
+# 提取前10的高变基因
+top10 <- head(VariableFeatures(seurat), 10)
+
+# 展示高变基因
+pdf("高变基因.pdf")
+VariableFeaturePlot(seurat)
+dev.off()
+pdf("标记前10高变基因.pdf")
+LabelPoints(plot = VariableFeaturePlot(seurat), points = top10, repel = TRUE)
+dev.off()
+
+#保存数据
+saveRDS(seurat,"seurat1.rds")
+
+randomColor <- function() {
+  paste0("#",paste0(sample(c(0:9, letters[1:6]), 6, replace = TRUE),collapse = ""))
+}
+
+# 生成100个随机颜色
+randomColors <- replicate(100,randomColor())
+seurat=readRDS("seurat1.rds")#读取数据
+#归一化
+all.genes <- rownames(seurat)
+seurat <- ScaleData(seurat, features = all.genes)
+
+# PCA降维
+seurat <- Seurat::RunPCA(seurat, features = VariableFeatures(object = seurat))
+seurat <- Seurat::RunTSNE(seurat,dims = 1:20)
+pdf(file = "降维tsne图.pdf",width =7.5,height = 5.5)
+DimPlot(seurat, reduction = "tsne",pt.size = 0.5)+theme_classic()+theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"),legend.position = "right") #top为图列位置最上方，除此之外还有right、left、bottom(意思同英文)
+dev.off()
+pdf(file = "降维pca图.pdf",width =7.5,height = 5.5)
+DimPlot(seurat, reduction = "pca",pt.size = 0.5)+theme_classic()+theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"),legend.position = "right")
+dev.off()
+colaa=distinctColorPalette(100)
+pdf(file = "降维tsne单样品分布图.pdf",width =12,height = 10)
+DimPlot(object = seurat,
+        reduction = "tsne",
+        split.by = "Type",
+        dims = c(1, 2),
+        pt.size = 0.5) +
+  ggtitle("") +
+  theme(legend.position = "bottom")
+dev.off()
+
+#harmony 去批次
+seurat <- RunHarmony(seurat, group.by.vars = "Type")
+
+## 鉴定高变基因（由于去除了存在批次的细胞，高变基因可能会发生改变，因此需要重新鉴定高变基因）
+seurat <- FindVariableFeatures(seurat, selection.method = "vst", nfeatures = 2000)
+
+# 提取前10的高变基因
+top10 <- head(VariableFeatures(seurat), 10)
+
+# 展示高变基因
+plot1 <- VariableFeaturePlot(seurat)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+
+pdf(file = "去批次后鉴定高变基因.pdf",width =7,height = 6)
+plot2                  
+dev.off()
+#降维可视化
+pdf(file = "harmony去批次pca图.pdf",width =7.5,height = 5.5)
+DimPlot(seurat, reduction = "harmony",pt.size = 0.5)+theme_classic()+theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"),legend.position = "right")
+dev.off()
+seurat <- Seurat::RunTSNE(seurat,dims = 1:20,reduction ='harmony')
+pdf(file = "去批次后tsne图.pdf",width =7.5,height = 5.5)
+DimPlot(seurat, reduction = "tsne",pt.size = 0.5)+theme_classic()+theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"),legend.position = "right")
+dev.off()
+collist=c(ggsci::pal_nejm()(8))
+names(collist)=names(table(seurat$Type))
+pdf(file = "去批次后tsne单样本分布图.pdf",width =12,height = 7.5)
+do_DimPlot(sample = seurat,
+           plot.title = "",
+           reduction = "tsne",
+           legend.position = "bottom",
+           dims = c(1,2),split.by = "Type",pt.size =0.5) 
+dev.off()
+
+##保存去批次后数据
+saveRDS(seurat,"去批次后seurat.rds")
+
+randomColor <- function() {
+  paste0("#",paste0(sample(c(0:9, letters[1:6]), 6, replace = TRUE),collapse = ""))
+}
+
+# 生成100个随机颜色
+randomColors <- replicate(100,randomColor())
+seurat=readRDS("去批次后seurat.rds")#读取数据
+
+collist=c(ggsci::pal_nejm()(8))
+names(collist)=names(table(seurat$Type))
+#热图可视化前20个PC
+pdf(file = "前20个PC热图.pdf",width =7.5,height = 9)
+DimHeatmap(seurat, dims = 1:20, cells = 1000, balanced = TRUE)
+dev.off()
+##确定使用PC个数
+seurat <- JackStraw(seurat, num.replicate = 100)
+seurat <- ScoreJackStraw(seurat, dims = 1:20)
+pdf(file = "jackstrawplot.pdf",width =7.5,height = 5.5)
+JackStrawPlot(seurat, dims = 1:20)
+dev.off()
+pdf(file = "ElbowPlot.pdf",width =5,height = 4)ElbowPlot(seurat,ndims = 30)
+dev.off()
+
+#选择PC数
+seuratPC=10
+##对细胞聚类
+seurat=FindNeighbors(seurat, dims = 1:seuratPC, reduction = "harmony")
+#挑选分辨率
+for (res in c(0.01,0.05,0.1,1,1.5,2,2.5,3,3.5,4)) {
+   seurat=FindClusters(seurat, graph.name = "RNA_snn", resolution = res, algorithm = 1)}
+apply(seurat@meta.data[,grep("RNA_snn_res",colnames(seurat@meta.data))],2,table)
+
+p2_tree=clustree(seurat@meta.data, prefix = "RNA_snn_res.")
+pdf(file = "分辨率.pdf",width =12,height =10)
+p2_tree
+dev.off()
+
+seurat=FindNeighbors(seurat, dims = 1:seuratPC, reduction = "harmony")
+
+#选择分辨率进行降维
+px=0.1
+seurat <- FindClusters(seurat, resolution = px)
+
+# only.pos：只保留上调差异表达的基因
+seurat.markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+write.csv(seurat.markers,file = "每个聚类的marker基因.csv")
+head(seurat.markers)
+
+#选择每个聚类前5各基因绘制热图
+top5seurat.markers <- seurat.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 5, wt = avg_log2FC)
+
+
+col <- c(ggsci::pal_npg()(9),ggsci::pal_jco()(9),ggsci::pal_jama()(7),ggsci::pal_nejm()(8))
+
+
+pdf(file = "聚类热图.pdf",width =40,height = 16)
+DoHeatmap(seurat,features = top5seurat.markers$gene,
+          group.colors = col) +
+  ggsci::scale_colour_npg() +
+  scale_fill_gradient2(low = '#0099CC',mid = 'white',high = '#CC0033',
+                       name = 'Z-score')
+dev.off()
+
+## 将细胞在低维空间可视化UMAP/tSNE
+seurat <- RunUMAP(seurat, dims = 1:seuratPC, reduction = "harmony")
+seurat <- RunTSNE(seurat, dims = 1:seuratPC, reduction = "harmony")
+
+# 可视化UMAP/tSNE3
+pdf(file = "聚类后UMAP.pdf",width =6.5,height = 5.5)
+DimPlot(seurat, reduction = "umap", label = T, label.size = 3.5,pt.size = 2)+theme_classic()+theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"),legend.position = "right")
+dev.off()
+pdf(file = "聚类后TSEN.pdf",width =6.5,height = 5.5)DimPlot(seurat, reduction = "tsne", label = T, label.size = 3.5,pt.size = 2)+theme_classic()+theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"),legend.position = "right")
+dev.off()
+
+#保存聚类后数据
+saveRDS(seurat,"聚类后seurat.rds")

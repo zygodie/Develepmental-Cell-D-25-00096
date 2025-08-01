@@ -1,0 +1,52 @@
+rm(list = ls())
+library(Seurat)
+library(dplyr)
+load("")
+p1 = DimPlot(seu.obj, reduction = "umap",label=T)+NoLegend()
+p1
+
+my_sub = ""
+sub.cells <- subset(seu.obj, idents = my_sub)
+f = "obj.Rdata"
+if(!file.exists(f)){
+  sub.cells = sub.cells %>%
+  NormalizeData() %>%
+  FindVariableFeatures() %>%
+  ScaleData(features = rownames(.)) %>%
+  RunPCA(features = VariableFeatures(.))  %>%
+  FindNeighbors(dims = 1:15) %>%
+  FindClusters(resolution = 0.5) %>%
+  RunUMAP(dims = 1:15) 
+  save(sub.cells,file = f)
+}
+load(f)
+DimPlot(sub.cells, reduction = 'umap',label = T)+NoLegend()
+
+sub.cells.markers <- FindAllMarkers(sub.cells, only.pos = TRUE,  
+                            min.pct = 0.25, logfc.threshold = 0.25)
+
+top10 <- sub.cells.markers %>% 
+  group_by(cluster) %>% 
+  top_n(n = 10, wt = avg_log2FC) %>% 
+  pull(gene);top10
+##  [1] "JCHAIN"  "IGKC"    "MZB1"    "PACSIN1" "WNT10A"  "MAP1A"   "VASH2"  
+##  [8] "NIBAN3"  "SMPD3"   "TNFRSF4" "LYZ"     "TIMP1"   "GPAT3"   "ITGAX"  
+## [15] "SAMSN1"  "OLR1"    "FPR3"    "EREG"    "FCN1"    "AKAP12"
+VlnPlot(sub.cells, features = top10)
+RidgePlot(sub.cells, features = top10)
+FeaturePlot(sub.cells, features = top10)
+DotPlot(sub.cells,features = top10)+ RotatedAxis()
+DoHeatmap(sub.cells, features = top10) + NoLegend()
+
+sub.cells@meta.data$celltype = paste0("M",sub.cells$seurat_clusters)
+#整合二次分群结果到原始对象
+seu.obj$celltype = as.character(Idents(seu.obj))
+seu.obj$celltype = ifelse(seu.obj$celltype==my_sub,
+       sub.cells$celltype[match(colnames(seu.obj),colnames(sub.cells))],
+       seu.obj$celltype) 
+Idents(seu.obj) = seu.obj$celltype
+p2 = DimPlot(seu.obj,label = T)+NoLegend()
+p1+p2
+
+目的基因表达图
+FeaturePlot(pbmc, features = c(""))

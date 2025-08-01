@@ -1,0 +1,111 @@
+devtools::install_github("sqjin/CellChat")
+
+library(Seurat)
+library(CellChat) 
+load(".")
+
+# sce1 是加载后的Seurat对象数据
+exp  <- sce1@assays$RNA@data
+meta <- sce2@meta.data
+dim(exp)
+head(exp)[,1:4]
+
+cellchat <- createCellChat(object = exp,
+                           meta = meta,
+                           group.by = "singleR")
+cellchat <- addMeta(cellchat, meta = meta)
+cellchat <- setIdent(cellchat, ident.use = "singleR")  
+levels(cellchat@idents)
+
+#加载数据库
+CellChatDB <- CellChatDB.human
+# 来看一下数据库的结构（option）：
+head(CellChatDB$interaction)
+
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+cellchat <- computeCommunProb(cellchat, raw.use = TRUE)
+# 如果某些细胞组中只有少数细胞，则过滤掉细胞间通信
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+df.net <- subsetCommunication(cellchat)
+df.net <- subsetCommunication(cellchat)
+df.net <- subsetCommunication(cellchat,
+                               sources.use = c(1,2),
+                               targets.use = c(4,5))
+df.net <- subsetCommunication(cellchat, signaling = c("CXCL", "ANGPTL"))
+
+cellchat <- computeCommunProbPathway(cellchat)
+
+cellchat <- aggregateNet(cellchat)
+
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = groupSize,
+                  weight.scale = T, label.edge= F,
+                  title.name = "Number of interactions")
+netVisual_circle(cellchat@net$weight,
+                  vertex.weight = groupSize,
+                  weight.scale = T, label.edge= F,
+                  title.name = "Interaction weights/strength")
+
+netVisual_circle(cellchat@net$weight,
+                  vertex.weight = groupSize,
+                  sources.use = c(1,2),
+                 targets.use = c(3,4),
+                 weight.scale = T, label.edge= F,
+                  title.name = "Interaction weights/strength")
+
+mat <- cellchat@net$weight
+colnames(mat)
+selet_mat <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+selet_mat[1, ] <- mat[1, ]
+netVisual_circle(selet_mat, vertex.weight = groupSize,
+                  weight.scale = T,
+                  edge.weight.max = max(mat),
+                  title.name = rownames(mat)[1])
+
+cellchat@netP$pathways
+pathways.show <- c("ANGPTL") 
+# Hierarchy plot
+# Here we define `vertex.receive` so that the left portion of the hierarchy plot shows signaling to fibroblast and the right portion shows signaling to immune cells 
+vertex.receiver = seq(1,5) # a numeric vector. 
+netVisual_aggregate(cellchat, signaling = pathways.show,
+                    vertex.receiver = vertex.receiver)
+
+group.cellType <- c("Epithelial_cells","Chondrocytes", "Endothelial_cells",
+                    "Tissue_stem_cells","NK_cell")
+names(group.cellType) <- levels(cellchat@idents)
+netVisual_chord_cell(cellchat, signaling = pathways.show,
+                     group = group.cellType,
+                      title.name = paste0(pathways.show, " signaling network"))
+
+pairLR.ANGPTL <- extractEnrichedLR(cellchat,
+                                    signaling = pathways.show,
+                                    geneLR.return = FALSE)
+LR.show <- pairLR.ANGPTL [1,] # show one ligand-receptor pair
+# Hierarchy plot
+vertex.receiver = seq(1,4) # a numeric vector
+netVisual_individual(cellchat,
+                      signaling = pathways.show,
+                       pairLR.use = LR.show, vertex.receiver = vertex.receiver)
+
+
+pathways.show.all <- cellchat@netP$pathways
+# check the order of cell identity to set suitable vertex.receiver
+levels(cellchat@idents)
+vertex.receiver = seq(1,4)
+for (i in 1:length(pathways.show.all)) {
+  # Visualize communication network associated with both signaling pathway and individual L-R pairs
+  netVisual(cellchat, signaling = pathways.show.all[i],
+             vertex.receiver = vertex.receiver, layout = "circle")
+  # Compute and visualize the contribution of each ligand-receptor pair to the overall signaling pathway  
+gg <- netAnalysis_contribution(cellchat,
+                                  signaling = pathways.show.all[i])  
+ggsave(filename=paste0(pathways.show.all[i], "_L-R_contribution.pdf"),
+          plot=gg, width = 3, height = 2, units = 'in', dpi = 300)
+}
+
+netVisual_bubble(cellchat,
+                  sources.use = 4,
+                  targets.use = c(1:5),
+                  remove.isolate = FALSE)
+
